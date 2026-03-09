@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       audio_url:
-        description: 'Direct Download Link of the MP3 file'
+        description: 'Direct Download Link of the PCM audio file'
         required: true
       video_title:
         description: 'Title of the output video'
@@ -23,12 +23,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Download Audio from Google Drive
-        run: wget -O audio.mp3 "${{ github.event.inputs.audio_url }}"
+        run: wget -O audio.pcm "${{ github.event.inputs.audio_url }}"
 
       - name: Combine Image and Audio to Video (9:16)
-        # คำสั่งลัด FFmpeg: เอาภาพ cover.jpg (ที่อยู่ใน repo) ผสม audio.mp3 ความยาวเท่าวิดีโอ
+        # ใช้คำสั่งพิเศษให้อ่านไฟล์เสียงดิบ (s16le, 24000Hz, 1 Channel)
         run: |
-          ffmpeg -loop 1 -i cover.jpg -i audio.mp3 -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "${{ github.event.inputs.video_title }}.mp4"
+          ffmpeg -f s16le -ar 24000 -ac 1 -i audio.pcm -loop 1 -i cover.jpg -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "${{ github.event.inputs.video_title }}.mp4"
 
       - name: Upload Video as Artifact
         uses: actions/upload-artifact@v4
