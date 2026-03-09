@@ -3,11 +3,11 @@ name: Generate Podcast Video
 on:
   workflow_dispatch:
     inputs:
-      audio_url:
-        description: 'Direct Download Link of the PCM audio file'
+      script_text:
+        description: 'Text script for Podcast'
         required: true
       video_title:
-        description: 'Title of the output video'
+        description: 'Title of the video'
         required: true
         default: 'podcast_video'
 
@@ -19,20 +19,27 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Dependencies (FFmpeg & Edge-TTS)
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install edge-tts
 
-      - name: Download Audio from Google Drive
-        run: wget -O audio.pcm "${{ github.event.inputs.audio_url }}"
+      - name: Generate Audio from Text (Thai Voice)
+        # เราเอาข้อความที่ส่งมา บันทึกลงไฟล์ script.txt ก่อนป้องกัน Error สัญลักษณ์
+        env:
+          SCRIPT_TEXT: ${{ github.event.inputs.script_text }}
+        run: |
+          echo "$SCRIPT_TEXT" > script.txt
+          # ใช้เสียงผู้ชายไทย (พี่นิวัฒน์) ถ้าอยากได้ผู้หญิงให้เปลี่ยนเป็น th-TH-PremwadeeNeural
+          edge-tts --voice th-TH-NiwatNeural -f script.txt --write-media audio.mp3
 
       - name: Combine Image and Audio to Video (9:16)
-        # ใช้คำสั่งพิเศษให้อ่านไฟล์เสียงดิบ (s16le, 24000Hz, 1 Channel)
         run: |
-          ffmpeg -f s16le -ar 24000 -ac 1 -i audio.pcm -loop 1 -i cover.jpg -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "${{ github.event.inputs.video_title }}.mp4"
+          ffmpeg -loop 1 -framerate 1 -i cover.jpg -i audio.mp3 -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest "${{ github.event.inputs.video_title }}.mp4"
 
-      - name: Upload Video as Artifact
+      - name: Upload Video
         uses: actions/upload-artifact@v4
         with:
           name: Podcast-Video
           path: "*.mp4"
-          retention-days: 1
+          retention-days: 3
