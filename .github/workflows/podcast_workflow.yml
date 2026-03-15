@@ -127,23 +127,25 @@ jobs:
             echo "✅ Created gradient background"
           fi
 
+
+
       # ─────────────────────────────────────────
-      # 6. PREPARE CARTOON CLIP (วนลูป)
+      # 6. PREPARE CARTOON CLIP (วนลูป + พื้นหลังโปร่งใส)
       # ─────────────────────────────────────────
       - name: 🎭 Prepare Looping Cartoon Clip
         run: |
           DURATION=${{ env.AUDIO_DURATION }}
           LOOP_DUR=$(python3 -c "print(float('${DURATION}') + 2)")
 
-          if [ -f "cartoon.mp4" ]; then
-            SRC="cartoon.mp4"
-          elif [ -f "cartoon.gif" ]; then
+          if [ -f "cartoon.gif" ]; then
+            # แปลง GIF → APNG เพื่อรักษา transparency
             ffmpeg -y -i cartoon.gif \
-              -movflags faststart \
-              -pix_fmt yuv420p \
-              -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" \
-              cartoon_converted.mp4
-            SRC="cartoon_converted.mp4"
+              -plays 0 \
+              cartoon_alpha.apng
+            SRC="cartoon_alpha.apng"
+            echo "✅ Using cartoon.gif with transparency"
+          elif [ -f "cartoon.mp4" ]; then
+            SRC="cartoon.mp4"
           else
             ffmpeg -y -f lavfi \
               -i "color=0x00aa44:size=300x300:rate=25" \
@@ -153,21 +155,26 @@ jobs:
 
           echo "Using cartoon source: $SRC"
 
+          # วนลูปจนครบ duration — คงสัดส่วนเดิม ขยายเต็ม 1080px
           ffmpeg -y \
             -stream_loop -1 -i "$SRC" \
             -t "$LOOP_DUR" \
-            -vf "scale=320:320:force_original_aspect_ratio=decrease,pad=320:320:(ow-iw)/2:(oh-ih)/2:color=black@0" \
-            -c:v libx264 -pix_fmt yuv420p \
-            cartoon_loop.mp4
+            -vf "scale=1080:-1:flags=lanczos" \
+            -c:v libvpx-vp9 \
+            -pix_fmt yuva420p \
+            -auto-alt-ref 0 \
+            cartoon_loop.webm
 
-          echo "✅ cartoon_loop.mp4 ready (${LOOP_DUR}s)"
+          echo "✅ cartoon_loop.webm ready (${LOOP_DUR}s)"
 
       # ─────────────────────────────────────────
       # 7. COMPOSITE FINAL VIDEO
-      #    แก้ไข: ใช้ -framerate 25 แทน 1 ป้องกันภาพกระพริบ
-      #    การ์ตูน: กึ่งกลาง ห่างขอบล่าง 200px
-      #    x = (1080 - 320) / 2 = 380
-      #    y = 1920 - 320 - 200 = 1400
+      #    การ์ตูน: เต็มความกว้าง 1080px
+      #    ห่างขอบล่าง 200px
+      #    y = 1920 - cartoon_height - 200
+      #    cartoon_height = 1080 * (original_h/original_w)
+      #    GIF ขนาด 371x161 → scale to 1080 → height = 469
+      #    y = 1920 - 469 - 200 = 1251
       # ─────────────────────────────────────────
       - name: 🎬 Composite Final Video (9:16)
         env:
@@ -175,14 +182,22 @@ jobs:
         run: |
           DURATION=${{ env.AUDIO_DURATION }}
 
+          # คำนวณ height ของ cartoon หลัง scale เต็ม 1080px
+          ORIG_W=$(ffprobe -v quiet -select_streams v:0 \
+            -show_entries stream=width -of csv=p=0 cartoon_loop.webm)
+          ORIG_H=$(ffprobe -v quiet -select_streams v:0 \
+            -show_entries stream=height -of csv=p=0 cartoon_loop.webm)
+          CARTOON_Y=$(python3 -c "print(1920 - ${ORIG_H} - 200)")
+          echo "Cartoon size: ${ORIG_W}x${ORIG_H}, y=${CARTOON_Y}"
+
           ffmpeg -y \
             -loop 1 -framerate 25 -i background_final.jpg \
-            -i cartoon_loop.mp4 \
+            -i cartoon_loop.webm \
             -i audio.wav \
             -filter_complex "
               [0:v]scale=1080:1920,setsar=1,fps=25[bg];
-              [1:v]scale=320:320[cartoon];
-              [bg][cartoon]overlay=380:1400:shortest=0[out]
+              [1:v]scale=1080:-1[cartoon];
+              [bg][cartoon]overlay=0:${CARTOON_Y}:shortest=0[out]
             " \
             -map "[out]" \
             -map "2:a" \
@@ -196,6 +211,8 @@ jobs:
 
           echo "✅ Final video: ${OUTPUT_FILENAME}.mp4"
           ls -lh "${OUTPUT_FILENAME}.mp4"
+
+
 
       - name: 📤 Upload Podcast Video
         uses: actions/upload-artifact@v4
