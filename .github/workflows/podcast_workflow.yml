@@ -31,19 +31,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ─────────────────────────────────────────
-      # 1. CHECKOUT
-      # ─────────────────────────────────────────
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────
-      # 2. INSTALL DEPENDENCIES
-      # ─────────────────────────────────────────
       - name: 🔧 Install FFmpeg & Python libs
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg imagemagick fonts-thai-tlwg
+          sudo apt-get install -y ffmpeg fonts-thai-tlwg
           pip install requests --quiet
 
       # ─────────────────────────────────────────
@@ -56,12 +50,12 @@ jobs:
           VOICE_NAME: ${{ github.event.inputs.voice_name }}
         run: |
           python3 << 'EOF'
-          import os, requests, base64, struct, json
+          import os, requests, base64, struct
 
-          api_key   = os.environ["GEMINI_API_KEY"]
-          text      = os.environ["SCRIPT_TEXT"]
-          voice     = os.environ.get("VOICE_NAME", "Puck")
-          url       = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={api_key}"
+          api_key = os.environ["GEMINI_API_KEY"]
+          text    = os.environ["SCRIPT_TEXT"]
+          voice   = os.environ.get("VOICE_NAME", "Puck")
+          url     = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={api_key}"
 
           payload = {
             "contents": [{"role": "user", "parts": [{"text": text}]}],
@@ -80,15 +74,14 @@ jobs:
           r.raise_for_status()
           data = r.json()
 
-          inline = data["candidates"][0]["content"]["parts"][0]["inlineData"]
+          inline    = data["candidates"][0]["content"]["parts"][0]["inlineData"]
           pcm_bytes = base64.b64decode(inline["data"])
           print(f"✅ Got PCM audio: {len(pcm_bytes)} bytes")
 
-          # Convert PCM → WAV (24000Hz, mono, 16-bit)
           sample_rate, num_ch, bit_depth = 24000, 1, 16
-          byte_rate = sample_rate * num_ch * bit_depth // 8
+          byte_rate   = sample_rate * num_ch * bit_depth // 8
           block_align = num_ch * bit_depth // 8
-          data_len = len(pcm_bytes)
+          data_len    = len(pcm_bytes)
 
           with open("audio.wav", "wb") as f:
             f.write(b"RIFF")
@@ -113,114 +106,68 @@ jobs:
           echo "Audio duration: ${DURATION}s"
 
       # ─────────────────────────────────────────
-      # 5. CREATE BACKGROUND IMAGE WITH TITLE
-      #    9:16 = 1080x1920
-      #    - ใช้ cover.jpg (ถ้ามี) หรือสร้าง gradient สีเอง
-      #    - วาดชื่อเรื่องด้านบน
+      # 5. PREPARE BACKGROUND IMAGE (ไม่มีข้อความ)
       # ─────────────────────────────────────────
-      - name: 🎨 Create Background Image with Title
-        env:
-          VIDEO_TITLE: ${{ github.event.inputs.video_title }}
+      - name: 🎨 Prepare Background Image
         run: |
-          python3 << 'EOF'
-          import subprocess, os, shutil
+          W=1080
+          H=1920
 
-          title = os.environ["VIDEO_TITLE"]
-          W, H  = 1080, 1920
-
-          # ── ถ้ามี cover.jpg ใน repo ใช้เลย ──────────────────
-          if os.path.exists("cover.jpg"):
-            # resize ให้ได้ 9:16 พอดี
-            subprocess.run([
-              "ffmpeg", "-y", "-i", "cover.jpg",
-              "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,"
-                     f"crop={W}:{H}",
-              "bg_resized.jpg"
-            ], check=True)
-            bg_file = "bg_resized.jpg"
-          else:
-            # ── สร้าง gradient สีม่วง-น้ำเงิน (ไม่มีรูป) ──────
-            subprocess.run([
-              "ffmpeg", "-y",
-              "-f", "lavfi",
-              "-i", f"color=0x1a0533:size={W}x{H}:rate=1",
-              "-vframes", "1", "bg_plain.jpg"
-            ], check=True)
-            bg_file = "bg_plain.jpg"
-
-          # ── วาง title ด้วย ffmpeg drawtext ──────────────────
-          font_path = "/usr/share/fonts/truetype/tlwg/TlwgTypo.ttf"
-          if not os.path.exists(font_path):
-            font_path = "/usr/share/fonts/truetype/tlwg/Loma.ttf"
-
-          # แบ่ง title ถ้ายาวเกิน (ตัดตาม 20 ตัวอักษร)
-          words = title
-          filter_text = (
-            f"drawtext=text='{words}':"
-            f"fontfile='{font_path}':"
-            f"fontcolor=white:"
-            f"fontsize=72:"
-            f"borderw=3:bordercolor=black:"
-            f"x=(w-text_w)/2:"
-            f"y=120:"
-            f"line_spacing=20"
-          )
-
-          subprocess.run([
-            "ffmpeg", "-y", "-i", bg_file,
-            "-vf", filter_text,
-            "background_final.jpg"
-          ], check=True)
-          print("✅ Background image created: background_final.jpg")
-          EOF
+          if [ -f "cover.jpg" ]; then
+            # Resize cover.jpg ให้ได้ 9:16 พอดี ไม่มีข้อความ
+            ffmpeg -y -i cover.jpg \
+              -vf "scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}" \
+              background_final.jpg
+            echo "✅ Using cover.jpg as background"
+          else
+            # สร้างพื้นหลังสีม่วงเข้ม
+            ffmpeg -y -f lavfi \
+              -i "color=0x1a0533:size=${W}x${H}:rate=25" \
+              -vframes 1 background_final.jpg
+            echo "✅ Created gradient background"
+          fi
 
       # ─────────────────────────────────────────
       # 6. PREPARE CARTOON CLIP (วนลูป)
-      #    cartoon.mp4 / cartoon.gif ต้องอยู่ใน repo
-      #    ถ้าไม่มี → ใช้ placeholder สีเขียว
       # ─────────────────────────────────────────
       - name: 🎭 Prepare Looping Cartoon Clip
         run: |
           DURATION=${{ env.AUDIO_DURATION }}
+          LOOP_DUR=$(python3 -c "print(float('${DURATION}') + 2)")
 
-          # หา source ไฟล์การ์ตูน
           if [ -f "cartoon.mp4" ]; then
             SRC="cartoon.mp4"
           elif [ -f "cartoon.gif" ]; then
-            # แปลง GIF → MP4 ก่อน
-            ffmpeg -y -i cartoon.gif -movflags faststart \
-              -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" \
+            ffmpeg -y -i cartoon.gif \
+              -movflags faststart \
+              -pix_fmt yuv420p \
+              -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" \
               cartoon_converted.mp4
             SRC="cartoon_converted.mp4"
           else
-            # สร้าง placeholder (วงกลมสีเขียว 3 วิ)
             ffmpeg -y -f lavfi \
               -i "color=0x00aa44:size=300x300:rate=25" \
-              -vf "drawtext=text='🎙️':fontsize=120:x=(w-text_w)/2:y=(h-text_h)/2" \
               -t 3 cartoon_placeholder.mp4
             SRC="cartoon_placeholder.mp4"
           fi
 
           echo "Using cartoon source: $SRC"
 
-          # วนลูปจนครบ duration ของเสียง (เพิ่ม 2 วิ buffer)
-          LOOP_DUR=$(python3 -c "print(float('${DURATION}') + 2)")
-
           ffmpeg -y \
             -stream_loop -1 -i "$SRC" \
             -t "$LOOP_DUR" \
-            -vf "scale=320:320:force_original_aspect_ratio=decrease,\
-                 pad=320:320:(ow-iw)/2:(oh-ih)/2:color=black@0" \
+            -vf "scale=320:320:force_original_aspect_ratio=decrease,pad=320:320:(ow-iw)/2:(oh-ih)/2:color=black@0" \
             -c:v libx264 -pix_fmt yuv420p \
             cartoon_loop.mp4
 
           echo "✅ cartoon_loop.mp4 ready (${LOOP_DUR}s)"
 
       # ─────────────────────────────────────────
-      # 7. COMPOSITE: BG + AUDIO + CARTOON → FINAL 9:16
-      #    Layout:
-      #    - พื้นหลัง 1080x1920 (cover + title)
-      #    - การ์ตูน 320x320 มุมขวาล่าง (offset 30px)
+      # 7. COMPOSITE FINAL VIDEO
+      #    แก้ไข: ใช้ -framerate 25 แทน 1 ป้องกันภาพกระพริบ
+      #    การ์ตูน: กึ่งกลาง ห่างขอบล่าง 200px
+      #    x = (1080 - 320) / 2 = 380
+      #    y = 1920 - 320 - 200 = 1400
       # ─────────────────────────────────────────
       - name: 🎬 Composite Final Video (9:16)
         env:
@@ -228,24 +175,21 @@ jobs:
         run: |
           DURATION=${{ env.AUDIO_DURATION }}
 
-          # ตำแหน่งการ์ตูน: มุมขวาล่าง ห่างขอบ 30px
-          # x = 1080 - 320 - 30 = 730
-          # y = 1920 - 320 - 30 = 1570
-
           ffmpeg -y \
             -loop 1 -framerate 25 -i background_final.jpg \
             -i cartoon_loop.mp4 \
             -i audio.wav \
             -filter_complex "
-              [0:v]scale=1080:1920,setsar=1[bg];
+              [0:v]scale=1080:1920,setsar=1,fps=25[bg];
               [1:v]scale=320:320[cartoon];
-              [bg][cartoon]overlay=730:1570:shortest=0[out]
+              [bg][cartoon]overlay=380:1400:shortest=0[out]
             " \
             -map "[out]" \
             -map "2:a" \
             -c:v libx264 -preset fast -crf 22 \
             -c:a aac -b:a 192k \
             -pix_fmt yuv420p \
+            -r 25 \
             -t "$DURATION" \
             -movflags +faststart \
             "${OUTPUT_FILENAME}.mp4"
@@ -253,9 +197,6 @@ jobs:
           echo "✅ Final video: ${OUTPUT_FILENAME}.mp4"
           ls -lh "${OUTPUT_FILENAME}.mp4"
 
-      # ─────────────────────────────────────────
-      # 8. UPLOAD ARTIFACT
-      # ─────────────────────────────────────────
       - name: 📤 Upload Podcast Video
         uses: actions/upload-artifact@v4
         with:
