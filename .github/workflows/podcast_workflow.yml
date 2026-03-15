@@ -137,35 +137,28 @@ jobs:
           DURATION=${{ env.AUDIO_DURATION }}
           LOOP_DUR=$(python3 -c "print(float('${DURATION}') + 2)")
 
-          if [ -f "cartoon.gif" ]; then
-            # แปลง GIF → APNG เพื่อรักษา transparency
-            ffmpeg -y -i cartoon.gif \
-              -plays 0 \
-              cartoon_alpha.apng
-            SRC="cartoon_alpha.apng"
-            echo "✅ Using cartoon.gif with transparency"
+          if [ -f "cartoon.webm" ]; then
+            SRC="cartoon.webm"
           elif [ -f "cartoon.mp4" ]; then
             SRC="cartoon.mp4"
-          else
-            ffmpeg -y -f lavfi \
-              -i "color=0x00aa44:size=300x300:rate=25" \
-              -t 3 cartoon_placeholder.mp4
-            SRC="cartoon_placeholder.mp4"
+          elif [ -f "cartoon.gif" ]; then
+            ffmpeg -y -i cartoon.gif -movflags faststart \
+              -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" \
+              cartoon_converted.mp4
+            SRC="cartoon_converted.mp4"
           fi
 
-          echo "Using cartoon source: $SRC"
-
-          # วนลูปจนครบ duration — คงสัดส่วนเดิม ขยายเต็ม 1080px
           ffmpeg -y \
             -stream_loop -1 -i "$SRC" \
             -t "$LOOP_DUR" \
-            -vf "scale=1080:-1:flags=lanczos" \
-            -c:v libvpx-vp9 \
-            -pix_fmt yuva420p \
-            -auto-alt-ref 0 \
+            -vf "scale=1080:-2:flags=lanczos" \
+            -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 \
             cartoon_loop.webm
 
-          echo "✅ cartoon_loop.webm ready (${LOOP_DUR}s)"
+          H=$(ffprobe -v quiet -select_streams v:0 \
+            -show_entries stream=height -of csv=p=0 cartoon_loop.webm)
+          echo "CARTOON_H=$H" >> $GITHUB_ENV
+          echo "✅ cartoon_loop.webm height=${H}px"
 
       # ─────────────────────────────────────────
       # 7. COMPOSITE FINAL VIDEO
@@ -181,14 +174,8 @@ jobs:
           OUTPUT_FILENAME: ${{ github.event.inputs.output_filename }}
         run: |
           DURATION=${{ env.AUDIO_DURATION }}
-
-          # คำนวณ height ของ cartoon หลัง scale เต็ม 1080px
-          ORIG_W=$(ffprobe -v quiet -select_streams v:0 \
-            -show_entries stream=width -of csv=p=0 cartoon_loop.webm)
-          ORIG_H=$(ffprobe -v quiet -select_streams v:0 \
-            -show_entries stream=height -of csv=p=0 cartoon_loop.webm)
-          CARTOON_Y=$(python3 -c "print(1920 - ${ORIG_H} - 200)")
-          echo "Cartoon size: ${ORIG_W}x${ORIG_H}, y=${CARTOON_Y}"
+          CARTOON_H=${{ env.CARTOON_H }}
+          CARTOON_Y=$((1920 - CARTOON_H - 200))
 
           ffmpeg -y \
             -loop 1 -framerate 25 -i background_final.jpg \
@@ -196,15 +183,14 @@ jobs:
             -i audio.wav \
             -filter_complex "
               [0:v]scale=1080:1920,setsar=1,fps=25[bg];
-              [1:v]scale=1080:-1[cartoon];
+              [1:v]scale=1080:-2,colorkey=0xFFFFFF:0.15:0.05[cartoon];
               [bg][cartoon]overlay=0:${CARTOON_Y}:shortest=0[out]
             " \
             -map "[out]" \
             -map "2:a" \
             -c:v libx264 -preset fast -crf 22 \
             -c:a aac -b:a 192k \
-            -pix_fmt yuv420p \
-            -r 25 \
+            -pix_fmt yuv420p -r 25 \
             -t "$DURATION" \
             -movflags +faststart \
             "${OUTPUT_FILENAME}.mp4"
