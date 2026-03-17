@@ -1,5 +1,5 @@
 name: 🎙️ Generate Podcast Video (9:16)
-
+ 
 on:
   workflow_dispatch:
     inputs:
@@ -25,7 +25,11 @@ on:
           - Kore
           - Fenrir
           - Aoede
-
+      cover_image_url:
+        description: 'URL รูปพื้นหลัง 9:16 จาก Google Drive'
+        required: false
+        default: ''
+ 
 jobs:
   build-video:
     runs-on: ubuntu-latest
@@ -106,26 +110,49 @@ jobs:
           echo "Audio duration: ${DURATION}s"
 
       # ─────────────────────────────────────────
-      # 5. PREPARE BACKGROUND IMAGE (ไม่มีข้อความ)
+      # 5. PREPARE BACKGROUND IMAGE (จาก Drive)
       # ─────────────────────────────────────────
       - name: 🎨 Prepare Background Image
+        env:
+          COVER_IMAGE_URL: ${{ github.event.inputs.cover_image_url }}
         run: |
-          W=1080
-          H=1920
+          python3 << 'EOF'
+          import os, requests, subprocess
 
-          if [ -f "cover.jpg" ]; then
-            # Resize cover.jpg ให้ได้ 9:16 พอดี ไม่มีข้อความ
-            ffmpeg -y -i cover.jpg \
-              -vf "scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}" \
-              background_final.jpg
-            echo "✅ Using cover.jpg as background"
-          else
-            # สร้างพื้นหลังสีม่วงเข้ม
-            ffmpeg -y -f lavfi \
-              -i "color=0x1a0533:size=${W}x${H}:rate=25" \
-              -vframes 1 background_final.jpg
-            echo "✅ Created gradient background"
-          fi
+          url = os.environ.get("COVER_IMAGE_URL", "")
+          W, H = 1080, 1920
+
+          if url:
+            # ดึงรูปจาก Drive URL โดยตรง
+            print(f"ดึงรูปจาก URL: {url[:60]}...")
+            r = requests.get(url, timeout=30, allow_redirects=True)
+            with open("cover_download.jpg", "wb") as f:
+              f.write(r.content)
+            subprocess.run([
+              "ffmpeg", "-y", "-i", "cover_download.jpg",
+              "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+              "background_final.jpg"
+            ], check=True)
+            print("✅ ใช้รูปจาก URL")
+
+          elif os.path.exists("cover.jpg"):
+            # fallback → cover.jpg ใน repo
+            subprocess.run([
+              "ffmpeg", "-y", "-i", "cover.jpg",
+              "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+              "background_final.jpg"
+            ], check=True)
+            print("✅ ใช้ cover.jpg จาก repo")
+
+          else:
+            # fallback → พื้นหลังสีม่วง
+            subprocess.run([
+              "ffmpeg", "-y", "-f", "lavfi",
+              "-i", f"color=0x1a0533:size={W}x{H}:rate=25",
+              "-vframes", "1", "background_final.jpg"
+            ], check=True)
+            print("✅ ใช้พื้นหลังสีม่วง (ไม่มีรูป)")
+          EOF
 
 
 
