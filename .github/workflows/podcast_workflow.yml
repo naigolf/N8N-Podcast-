@@ -217,7 +217,16 @@ jobs:
             -i audio.wav \
             -stream_loop -1 -i bgm.mp3 \
             -filter_complex "
-              [0:v]scale=1080:1920,setsar=1,fps=25[bg];
+              [0:v]scale=1200:2133,
+              zoompan=
+              z='if(lte(mod(on,250),125),
+                    1+0.03*(mod(on,125)/125),
+                    1.03-0.03*(mod(on,125)/125)
+                 )':
+              x='iw/2-(iw/zoom/2)':
+              y='ih/2-(ih/zoom/2)':
+              d=1:fps=25,
+              scale=1080:1920,setsar=1[bg];
               [1:v]scale=1080:-2,colorkey=0xFFFFFF:0.15:0.05[cartoon];
               [bg][cartoon]overlay=0:${CARTOON_Y}:shortest=0[out];
               [2:a]loudnorm=I=-14:TP=-1:LRA=11[audio_norm];
