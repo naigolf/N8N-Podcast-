@@ -215,11 +215,14 @@ jobs:
             -loop 1 -framerate 25 -i background_final.jpg \
             -i cartoon_loop.webm \
             -i audio.wav \
+            -stream_loop -1 -i bgm.mp3 \
             -filter_complex "
               [0:v]scale=1080:1920,setsar=1,fps=25[bg];
               [1:v]scale=1080:-2,colorkey=0xFFFFFF:0.15:0.05[cartoon];
               [bg][cartoon]overlay=0:${CARTOON_Y}:shortest=0[out];
-              [2:a]loudnorm=I=-14:TP=-1:LRA=11[audio_norm]
+              [2:a]loudnorm=I=-14:TP=-1:LRA=11[audio_norm];
+              [3:a]volume=0.12[bgm];
+              [voice_norm][bgm]amix=inputs=2:duration=first:dropout_transition=3[audio_mix]
             " \
             -map "[out]" \
             -map "[audio_norm]" \
