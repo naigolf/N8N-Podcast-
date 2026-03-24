@@ -225,7 +225,7 @@ jobs:
               [audio_norm][bgm]amix=inputs=2:duration=first:dropout_transition=3[audio_mix]
             " \
             -map "[out]" \
-            -map "[audio_norm]" \
+            -map "[audio_mix]" \
             -c:v libx264 -preset fast -crf 22 \
             -c:a aac -b:a 192k \
             -pix_fmt yuv420p -r 25 \
